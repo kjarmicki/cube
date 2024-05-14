@@ -19,17 +19,18 @@ import (
 type State int
 
 const (
-	Pending State = iota
-	Scheduled
-	Running
-	Completed
+	Pending   State = iota // initial state for every task
+	Scheduled              // manager has scheduled a task onto a worker
+	Running                // worker has successfully started a task
+	Completed              // task didn't fail and finished
 	Failed
 )
 
 type Task struct {
-	ID    uuid.UUID
-	Name  string
-	State State
+	ID          uuid.UUID
+	ContainerID string
+	Name        string
+	State       State
 	// container-specific properties
 	Image         string
 	Memory        int
@@ -64,6 +65,17 @@ type Config struct {
 	RestartPolicy string
 }
 
+func NewConfig(t *Task) Config {
+	return Config{
+		Name:          t.Name,
+		ExposedPorts:  t.ExposedPorts,
+		Image:         t.Image,
+		Memory:        int64(t.Memory),
+		Disk:          int64(t.Disk),
+		RestartPolicy: t.RestartPolicy,
+	}
+}
+
 type DockerResult struct {
 	Error       error
 	Action      string
@@ -74,6 +86,14 @@ type DockerResult struct {
 type Docker struct {
 	Client *client.Client
 	Config Config
+}
+
+func NewDocker(c Config) *Docker {
+	dc, _ := client.NewClientWithOpts(client.FromEnv)
+	return &Docker{
+		Client: dc,
+		Config: c,
+	}
 }
 
 // essentially the same as docker run from cli

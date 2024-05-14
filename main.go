@@ -2,52 +2,44 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/docker/docker/client"
+	"github.com/golang-collections/collections/queue"
+	"github.com/google/uuid"
 	"kjarmicki.github.com/cube/task"
+	"kjarmicki.github.com/cube/worker"
 )
 
 func main() {
-	fmt.Println("starting test container")
-	d, dr := createContainer()
-	if d == nil {
-		os.Exit(1)
+	w := worker.Worker{
+		Queue: *queue.New(),
+		Db:    make(map[uuid.UUID]*task.Task),
 	}
-	time.Sleep(time.Second * 5)
-	stopContainer(d, dr.ContainerId)
-}
 
-func createContainer() (*task.Docker, *task.DockerResult) {
-	c := task.Config{
+	t := task.Task{
+		ID:    uuid.New(),
 		Name:  "test-container-1",
-		Image: "postgres:13",
-		Env: []string{
-			"POSTGRES_USER=cube",
-			"POSTGRES_PASSWORD=secret",
-		},
+		State: task.Scheduled,
+		Image: "strm/helloworld-http",
 	}
 
-	dc, _ := client.NewClientWithOpts(client.FromEnv)
-	d := task.Docker{
-		Config: c,
-		Client: dc,
-	}
-	result := d.Run()
+	fmt.Println("starting task")
+	w.AddTask(t)
+	result := w.RunTask()
 	if result.Error != nil {
-		return nil, nil
+		panic(result.Error)
 	}
 
-	fmt.Printf("Container %s is running with config %v\n", result.ContainerId, c)
-	return &d, &result
-}
+	t.ContainerID = result.ContainerId
+	fmt.Printf("task %s is runnning in a container %s\n", t.ID, t.ContainerID)
+	fmt.Println("sleeping")
+	time.Sleep(time.Second * 45)
 
-func stopContainer(d *task.Docker, id string) *task.DockerResult {
-	result := d.Stop(id)
+	fmt.Printf("stopping task %s\n", t.ID)
+	t.State = task.Completed
+	w.AddTask(t)
+	result = w.RunTask()
 	if result.Error != nil {
-		return nil
+		panic(result.Error)
 	}
-	fmt.Printf("Container %s has stopped\n", id)
-	return &result
 }
