@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/golang-collections/collections/queue"
@@ -11,35 +11,34 @@ import (
 )
 
 func main() {
+	host := "localhost"
+	port := 3030
+
 	w := worker.Worker{
 		Queue: *queue.New(),
 		Db:    make(map[uuid.UUID]*task.Task),
 	}
-
-	t := task.Task{
-		ID:    uuid.New(),
-		Name:  "test-container-1",
-		State: task.Scheduled,
-		Image: "strm/helloworld-http",
+	api := worker.Api{
+		Address: host,
+		Port:    port,
+		Worker:  &w,
 	}
 
-	fmt.Println("starting task")
-	w.AddTask(t)
-	result := w.RunTask()
-	if result.Error != nil {
-		panic(result.Error)
-	}
+	go runTasks(&w)
+	api.Start()
+}
 
-	t.ContainerID = result.ContainerId
-	fmt.Printf("task %s is runnning in a container %s\n", t.ID, t.ContainerID)
-	fmt.Println("sleeping")
-	time.Sleep(time.Second * 45)
-
-	fmt.Printf("stopping task %s\n", t.ID)
-	t.State = task.Completed
-	w.AddTask(t)
-	result = w.RunTask()
-	if result.Error != nil {
-		panic(result.Error)
+func runTasks(w *worker.Worker) {
+	for {
+		if w.Queue.Len() != 0 {
+			result := w.RunTask()
+			if result.Error != nil {
+				log.Printf("Error running task: %v\n", result.Error)
+			}
+		} else {
+			log.Println("No tasks to process")
+		}
+		log.Println("Sleeping for 10 seconds")
+		time.Sleep(10 * time.Second)
 	}
 }

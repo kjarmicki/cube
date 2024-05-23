@@ -57,6 +57,14 @@ func (w *Worker) AddTask(t task.Task) {
 	w.Queue.Enqueue(t)
 }
 
+func (w *Worker) GetTasks() []*task.Task {
+	tasks := make([]*task.Task, 0, len(w.Db))
+	for _, task := range w.Db {
+		tasks = append(tasks, task)
+	}
+	return tasks
+}
+
 func (w *Worker) StartTask(t task.Task) task.DockerResult {
 	t.StartTime = time.Now().UTC()
 	config := task.NewConfig(&t)
