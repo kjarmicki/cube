@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/golang-collections/collections/queue"
 	"github.com/google/uuid"
@@ -46,6 +47,14 @@ func (m *Manager) AddTask(te task.TaskEvent) {
 	m.Pending.Enqueue(te)
 }
 
+func (m *Manager) GetTasks() []*task.Task {
+	tasks := make([]*task.Task, 0, len(m.TaskDb))
+	for _, task := range m.TaskDb {
+		tasks = append(tasks, task)
+	}
+	return tasks
+}
+
 func (m *Manager) SelectWorker() string {
 	var newWorker int
 	if m.LastWorker+1 < len(m.Workers) {
@@ -57,32 +66,32 @@ func (m *Manager) SelectWorker() string {
 	return m.Workers[newWorker]
 }
 
-func (m *Manager) UpdateTasks() {
+func (m *Manager) updateTasks() {
 	for _, worker := range m.Workers {
-		log.Printf("Checking worker %s for task updates\n", worker)
+		log.Printf("[Manager] Checking worker %s for task updates\n", worker)
 		url := fmt.Sprintf("http://%s/tasks", worker)
 		resp, err := http.Get(url)
 		if err != nil {
-			log.Printf("Error while connecting to %s for task updates\n", worker)
+			log.Printf("[Manager] Error while connecting to %s for task updates\n", worker)
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			log.Printf("Unexpected status code from %s (%d)\n", worker, resp.StatusCode)
+			log.Printf("[Manager] Unexpected status code from %s (%d)\n", worker, resp.StatusCode)
 			continue
 		}
 		d := json.NewDecoder(resp.Body)
 		var tasks []*task.Task
 		err = d.Decode(&tasks)
 		if err != nil {
-			log.Printf("Error while decoding response: %v\n", err)
+			log.Printf("[Manager] Error while decoding response: %v\n", err)
 			continue
 		}
 
 		for _, t := range tasks {
-			log.Printf("Attempting to update task %s\n", t.ID)
+			log.Printf("[Manager] Attempting to update task %s\n", t.ID)
 			_, ok := m.TaskDb[t.ID]
 			if !ok {
-				log.Printf("Task with ID %s not found\n", t.ID)
+				log.Printf("[Manager] Task with ID %s not found\n", t.ID)
 				continue
 			}
 			m.TaskDb[t.ID].State = t.State
@@ -90,6 +99,24 @@ func (m *Manager) UpdateTasks() {
 			m.TaskDb[t.ID].FinishTime = t.FinishTime
 			m.TaskDb[t.ID].ContainerID = t.ContainerID
 		}
+	}
+}
+
+func (m *Manager) UpdateTasks() {
+	for {
+		log.Println("[Manager] Checking for task updates from workers")
+		m.updateTasks()
+		log.Println("[Manager] Tasks updating completed, sleeping for 15 seconds")
+		time.Sleep(15 * time.Second)
+	}
+}
+
+func (m *Manager) ProcessTasks() {
+	for {
+		log.Println("[Manager] Processing any tasks in the queue")
+		m.SendWork()
+		log.Println("[Manager] Tasks processed, sleeping for 10 seconds")
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -111,14 +138,14 @@ func (m *Manager) SendWork() {
 
 		data, err := json.Marshal(te)
 		if err != nil {
-			log.Printf("Error while marshaling task %s: %v\n", te.Task.ID, err)
+			log.Printf("[Manager] Error while marshaling task %s: %v\n", te.Task.ID, err)
 			return
 		}
 
 		url := fmt.Sprintf("http://%s/tasks", w)
 		resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
 		if err != nil {
-			log.Printf("Error while connecting to %s: %v\n", url, err)
+			log.Printf("[Manager] Error while connecting to %s: %v\n", url, err)
 			m.Pending.Enqueue(te)
 			return
 		}
@@ -128,20 +155,20 @@ func (m *Manager) SendWork() {
 			e := worker.ErrResponse{}
 			err := d.Decode(&d)
 			if err != nil {
-				log.Printf("Error while decoding response: %v\n", err)
+				log.Printf("[Manager] Error while decoding response: %v\n", err)
 				return
 			}
-			log.Printf("Response error (%d): %s\n", resp.StatusCode, e.Message)
+			log.Printf("[Manager] Response error (%d): %s\n", resp.StatusCode, e.Message)
 			return
 		}
 		t = task.Task{}
 		err = d.Decode(&t)
 		if err != nil {
-			log.Printf("Error while decoding response: %v\n", err)
+			log.Printf("[Manager] Error while decoding response: %v\n", err)
 			return
 		}
 		log.Printf("%#v\n", t)
 	} else {
-		log.Println("No tasks in the queue")
+		log.Println("[Manager] No tasks in the queue")
 	}
 }

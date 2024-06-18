@@ -19,13 +19,13 @@ type Worker struct {
 }
 
 func (w *Worker) CollectStats() {
-	fmt.Println("I will collect stats")
+	log.Println("[Worker] I will collect stats")
 }
 
-func (w *Worker) RunTask() task.DockerResult {
+func (w *Worker) runTask() task.DockerResult {
 	t := w.Queue.Dequeue() // pull a task off the queue
 	if t == nil {
-		log.Println("no tasks in the queue")
+		log.Println("[Worker] no tasks in the queue")
 		return task.DockerResult{Error: nil}
 	}
 	taskQueued := t.(task.Task)
@@ -71,7 +71,7 @@ func (w *Worker) StartTask(t task.Task) task.DockerResult {
 	d := task.NewDocker(config)
 	result := d.Run()
 	if result.Error != nil {
-		log.Printf("Error running task %s: %v\n", t.ID, result.Error)
+		log.Printf("[Worker] Error running task %s: %v\n", t.ID, result.Error)
 		t.State = task.Failed
 		w.Db[t.ID] = &t
 		return result
@@ -88,11 +88,26 @@ func (w *Worker) StopTask(t task.Task) task.DockerResult {
 
 	result := d.Stop(t.ContainerID)
 	if result.Error != nil {
-		log.Printf("Error stopping container %s: %v\n", t.ContainerID, result.Error)
+		log.Printf("[Worker] Error stopping container %s: %v\n", t.ContainerID, result.Error)
 	}
 	t.FinishTime = time.Now().UTC()
 	t.State = task.Completed
 	w.Db[t.ID] = &t
-	log.Printf("Stopped and removed container %s for task %d\n", t.ContainerID, t.ID)
+	log.Printf("[Worker] Stopped and removed container %s for task %d\n", t.ContainerID, t.ID)
 	return result
+}
+
+func (w *Worker) RunTasks() {
+	for {
+		if w.Queue.Len() != 0 {
+			result := w.runTask()
+			if result.Error != nil {
+				log.Printf("[Worker] Error running task: %v\n", result.Error)
+			}
+		} else {
+			log.Println("[Worker] No tasks to process")
+		}
+		log.Println("[Worker] Sleeping for 10 seconds")
+		time.Sleep(10 * time.Second)
+	}
 }
