@@ -3,11 +3,14 @@ package manager
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/golang-collections/collections/queue"
 	"github.com/google/uuid"
 	"kjarmicki.github.com/cube/task"
@@ -171,4 +174,102 @@ func (m *Manager) SendWork() {
 	} else {
 		log.Println("[Manager] No tasks in the queue")
 	}
+}
+
+func (m *Manager) DoHealthChecks() {
+	for {
+		log.Println("[Manager] Performing tasks health check")
+		m.doHealthChecks()
+		log.Println("[Manager] Health check completed, sleeping for 15 seconds")
+		time.Sleep(time.Second * 15)
+	}
+}
+
+func (m *Manager) checkTaskHealth(t task.Task) error {
+	log.Printf("[Manager] Checking health for task %s\n", t.ID)
+
+	w := m.TaskWorkerMap[t.ID]
+	hostPort := getHostPort(t.HostPorts)
+	worker := strings.Split(w, ":")
+	url := fmt.Sprintf("http://%s:%s%s", worker[0], *hostPort, t.HealthCheck)
+	log.Printf("[Manager] Calling health check for task %s at %s\n", t.ID, url)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("[Manager] Error connecting to health check, %s\n", err.Error())
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg := fmt.Sprintf("[Manager] Response status code was %d when %d was expected", resp.StatusCode, http.StatusOK)
+		log.Println(msg)
+		return errors.New(msg)
+	}
+	log.Printf("[Manager] Task %s has passed the health check\n", t.ID)
+	return nil
+}
+
+func (m *Manager) doHealthChecks() {
+	for _, t := range m.GetTasks() {
+		if t.State == task.Running {
+			err := m.checkTaskHealth(*t)
+			if err != nil && t.RestartCount < 3 {
+				m.restartTask(t)
+			}
+		} else if t.State == task.Failed && t.RestartCount < 3 {
+			m.restartTask(t)
+		}
+	}
+}
+
+func (m *Manager) restartTask(t *task.Task) {
+	w := m.TaskWorkerMap[t.ID]
+	t.State = task.Scheduled
+	t.RestartCount++
+	m.TaskDb[t.ID] = t
+
+	te := task.TaskEvent{
+		ID:        uuid.New(),
+		State:     task.Running,
+		Timestamp: time.Now(),
+		Task:      *t,
+	}
+	data, err := json.Marshal(te)
+	if err != nil {
+		log.Printf("[Manager] Error while marshalling task event: %s\n", err)
+		return
+	}
+	url := fmt.Sprintf("http://%s/tasks", w)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		log.Printf("[Manager] Error connecting to %s: %s\n", w, err.Error())
+		m.Pending.Enqueue(te)
+		return
+	}
+
+	d := json.NewDecoder(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		e := worker.ErrResponse{}
+		err := d.Decode(&e)
+		if err != nil {
+			log.Printf("[Manager] Error while decoding error response body: %s\n", err.Error())
+			return
+		}
+		log.Printf("[Manager] Response error: %s", e.Message)
+		return
+	}
+
+	newTask := task.Task{}
+	err = d.Decode(&newTask)
+	if err != nil {
+		log.Printf("[Manager] Error while decoding success response body: %s\n", err.Error())
+		return
+	}
+
+	log.Printf("[Manager] Restarted task %s", t.ID)
+}
+
+func getHostPort(ports nat.PortMap) *string {
+	for k, _ := range ports {
+		return &ports[k][0].HostPort
+	}
+	return nil
 }
