@@ -26,6 +26,7 @@ func main() {
 	}
 
 	go w.RunTasks()
+	go w.UpdateTasks()
 	go wapi.Start()
 
 	workers := []string{fmt.Sprintf("%s:%d", host, wport)}
@@ -34,6 +35,7 @@ func main() {
 
 	go m.ProcessTasks()
 	go m.UpdateTasks()
+	go m.DoHealthChecks()
 
 	mapi.Start()
 

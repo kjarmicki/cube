@@ -101,6 +101,7 @@ func (m *Manager) updateTasks() {
 			m.TaskDb[t.ID].StartTime = t.StartTime
 			m.TaskDb[t.ID].FinishTime = t.FinishTime
 			m.TaskDb[t.ID].ContainerID = t.ContainerID
+			m.TaskDb[t.ID].HostPorts = t.HostPorts
 		}
 	}
 }
@@ -134,6 +135,7 @@ func (m *Manager) SendWork() {
 
 		m.EventDb[te.ID] = &te
 		m.WorkerTaskMap[w] = append(m.WorkerTaskMap[w], te.Task.ID)
+		m.TaskWorkerMap[t.ID] = w
 
 		// mark the task as scheduled
 		t.State = task.Scheduled
@@ -187,7 +189,9 @@ func (m *Manager) DoHealthChecks() {
 
 func (m *Manager) checkTaskHealth(t task.Task) error {
 	log.Printf("[Manager] Checking health for task %s\n", t.ID)
-
+	if t.HostPorts == nil {
+		return nil
+	}
 	w := m.TaskWorkerMap[t.ID]
 	hostPort := getHostPort(t.HostPorts)
 	worker := strings.Split(w, ":")
