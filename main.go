@@ -30,7 +30,7 @@ func main() {
 	go wapi.Start()
 
 	workers := []string{fmt.Sprintf("%s:%d", host, wport)}
-	m := manager.New(workers)
+	m := manager.New(workers, "roundrobin")
 	mapi := manager.Api{Address: host, Port: mport, Manager: m}
 
 	go m.ProcessTasks()

@@ -13,6 +13,8 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/golang-collections/collections/queue"
 	"github.com/google/uuid"
+	"kjarmicki.github.com/cube/node"
+	"kjarmicki.github.com/cube/scheduler"
 	"kjarmicki.github.com/cube/task"
 	"kjarmicki.github.com/cube/worker"
 )
@@ -25,15 +27,27 @@ type Manager struct {
 	WorkerTaskMap map[string][]uuid.UUID // list of tasks by worker
 	TaskWorkerMap map[uuid.UUID]string   // worker by task
 	LastWorker    int
+	WorkerNodes   []*node.Node
+	Scheduler     scheduler.Scheduler
 }
 
-func New(workers []string) *Manager {
+func New(workers []string, schedulerType string) *Manager {
 	taskDb := make(map[uuid.UUID]*task.Task)
 	eventDb := make(map[uuid.UUID]*task.TaskEvent)
 	workerTaskMap := make(map[string][]uuid.UUID)
 	taskWorkerMap := make(map[uuid.UUID]string)
+	var nodes []*node.Node
 	for worker := range workers {
 		workerTaskMap[workers[worker]] = []uuid.UUID{}
+		nAPI := fmt.Sprintf("http://%s", workers[worker])
+		n := node.NewNode(workers[worker], nAPI, "worker")
+		nodes = append(nodes, n)
+	}
+
+	var s scheduler.Scheduler
+	switch schedulerType {
+	default:
+		s = &scheduler.RoudRobin{Name: "roundrobin"}
 	}
 
 	return &Manager{
@@ -43,6 +57,8 @@ func New(workers []string) *Manager {
 		EventDb:       eventDb,
 		WorkerTaskMap: workerTaskMap,
 		TaskWorkerMap: taskWorkerMap,
+		WorkerNodes:   nodes,
+		Scheduler:     s,
 	}
 }
 
